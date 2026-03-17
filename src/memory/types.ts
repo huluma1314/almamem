@@ -20,6 +20,13 @@ export interface InsertMemoryInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface InsertMemoryWithIdInput extends InsertMemoryInput {
+  /** Deterministic id for de-dupe (e.g. tg:<chat>:<msg>) */
+  id: string;
+  /** Optional created_at override (ISO string). */
+  created_at?: string;
+}
+
 export interface SearchOptions {
   query: string;
   session_id?: string;

@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { openDatabase, closeDatabase } from './db/database';
 import {
   insertMemory,
+  insertMemoryWithId,
   getMemoriesBySession,
   searchMemories,
   getSessionIds,
@@ -13,6 +14,12 @@ import { assembleContext } from './context/assembler';
 import { loadConfig } from './config';
 import type { AlmaConfig } from './config';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { runTelegramPoll } from './integrations/telegram-poll';
+import { runAlmaTail } from './integrations/alma-tail';
+import type { TgSessionMode } from './integrations/telegram-utils';
+import type { AlmaSessionMode } from './integrations/alma-log';
 
 const program = new Command();
 program
@@ -24,6 +31,11 @@ program
 // Helper: resolve config + db once per command
 function resolveConfig(cmdOpts: { config?: string }): Required<AlmaConfig> {
   return loadConfig(cmdOpts.config);
+}
+
+function expandTilde(p: string): string {
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
 }
 
 program
@@ -166,6 +178,72 @@ program
     const db = openDatabase(cfg.dbPath);
     const ok = deleteMemory(db, id);
     console.log(ok ? 'deleted' : 'not found');
+    closeDatabase(db);
+  });
+
+// --- Integrations ---
+program
+  .command('tg-poll')
+  .description('Long-poll Telegram Bot API and ingest into SQLite')
+  .option('--token <token>', 'Telegram bot token (or env TELEGRAM_BOT_TOKEN)')
+  .option('--allowlist <ids>', 'Comma-separated chat_id allowlist')
+  .option('--session-mode <mode>', 'chat | chat_topic', 'chat_topic')
+  .option('--offset-file <path>', 'Offset state file', './tg.offset.json')
+  .option('--timeout <sec>', 'Long poll timeout seconds', '50')
+  .action(async (opts, cmd) => {
+    const cfg = resolveConfig(cmd.parent?.opts() ?? {});
+    const db = openDatabase(cfg.dbPath);
+
+    const token = String(opts.token ?? process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+    if (!token) {
+      console.error('Missing --token or TELEGRAM_BOT_TOKEN');
+      process.exit(1);
+    }
+
+    const allowlist = opts.allowlist
+      ? String(opts.allowlist).split(',').map((s: string) => s.trim()).filter(Boolean)
+      : undefined;
+
+    await runTelegramPoll({
+      db,
+      token,
+      allowlist,
+      sessionMode: String(opts.sessionMode) as TgSessionMode,
+      offsetFile: expandTilde(String(opts.offsetFile)),
+      timeoutSec: parseInt(String(opts.timeout), 10) || 50,
+    });
+
+    closeDatabase(db);
+  });
+
+program
+  .command('alma-tail')
+  .description('Tail Alma log files (~/.config/alma/chats and groups) and ingest into SQLite')
+  .option('--dirs <paths>', 'Comma-separated directories to watch')
+  .option('--state-file <path>', 'State file storing per-file offsets', './alma-tail.state.json')
+  .option('--allowlist <chatIds>', 'Comma-separated chatId allowlist')
+  .option('--session-mode <mode>', 'chat | chat_date | chat_msg', 'chat_date')
+  .option('--interval <ms>', 'Polling interval ms', '1000')
+  .action(async (opts, cmd) => {
+    const cfg = resolveConfig(cmd.parent?.opts() ?? {});
+    const db = openDatabase(cfg.dbPath);
+
+    const dirs = opts.dirs
+      ? String(opts.dirs).split(',').map((s: string) => expandTilde(s.trim())).filter(Boolean)
+      : undefined;
+    const allowlist = opts.allowlist
+      ? String(opts.allowlist).split(',').map((s: string) => s.trim()).filter(Boolean)
+      : undefined;
+
+    await runAlmaTail({
+      db,
+      dirs,
+      stateFile: expandTilde(String(opts.stateFile)),
+      allowlist,
+      sessionMode: String(opts.sessionMode) as AlmaSessionMode,
+      intervalMs: parseInt(String(opts.interval), 10) || 1000,
+    });
+
     closeDatabase(db);
   });
 

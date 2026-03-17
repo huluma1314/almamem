@@ -86,6 +86,8 @@ Config fields (all optional, fall back to defaults):
 | `alm roots <session>` | Show root summaries |
 | `alm context <session>` | Assemble context window |
 | `alm delete <id>` | Delete a memory by ID |
+| `alm tg-poll` | Long-poll Telegram and ingest into SQLite |
+| `alm alma-tail` | Tail Alma logs and ingest into SQLite |
 
 Global options:
 - `--config <path>` — path to JSON config file
@@ -102,7 +104,49 @@ Command options:
 Environment variables:
 - `ALMA_DB` — path to SQLite database file (default: `./alma.db`)
 
-## Architecture
+## Integrations
+
+### Telegram (Bot API long-poll)
+
+This ingests **all incoming updates** into the same SQLite database, storing the raw update JSON in `metadata` and using deterministic IDs to avoid duplicates.
+
+```bash
+# env var
+export TELEGRAM_BOT_TOKEN="..."
+
+# allowlist recommended
+node dist/cli.js tg-poll \
+  --allowlist 123456789,987654321 \
+  --session-mode chat_topic \
+  --offset-file ./tg.offset.json
+```
+
+Session mapping:
+- `chat` → `tg:<chat_id>`
+- `chat_topic` → `tg:<chat_id>:<message_thread_id>` (when thread id exists)
+
+Deterministic IDs:
+- normal: `tg:<chat_id>:<message_id>`
+- edited: `tg:<chat_id>:<message_id>:edit:<edit_date>`
+
+### Alma native logs (tail)
+
+This tails Alma log files under `~/.config/alma/chats` and `~/.config/alma/groups` and ingests new lines incrementally.
+
+```bash
+node dist/cli.js alma-tail \
+  --allowlist 123456789,987654321 \
+  --session-mode chat_date \
+  --state-file ./alma-tail.state.json
+```
+
+Session mapping:
+- `chat` → `alma:<chatId>`
+- `chat_date` → `alma:<chatId>:<YYYY-MM-DD>`
+- `chat_msg` → `alma:<chatId>:<YYYY-MM-DD>:<msgId>`
+
+Deterministic IDs:
+- `alma:<chatId>:<YYYY-MM-DD>:<msgId>:<who>` (who = alma|user)
 
 ```
 alma-lossless-memory/

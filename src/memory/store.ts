@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { AlmaDB } from '../db/database';
 import type {
-  Memory, InsertMemoryInput, SearchOptions, SearchResult, Role,
+  Memory, InsertMemoryInput, InsertMemoryWithIdInput, SearchOptions, SearchResult, Role,
 } from './types';
 import { estimateTokens } from './tokenizer';
 import { sanitizeFts } from '../fts/sanitizer';
@@ -38,6 +38,29 @@ export function insertMemory(db: AlmaDB, input: InsertMemoryInput): Memory {
   `).run(id, input.session_id, input.role, input.content, tokens, importance, metadata);
 
   return getMemoryById(db, id)!;
+}
+
+export function insertMemoryWithId(db: AlmaDB, input: InsertMemoryWithIdInput): Memory {
+  const tokens = estimateTokens(input.content);
+  const importance = input.importance ?? 0.5;
+  const metadata = JSON.stringify(input.metadata ?? {});
+  const created_at = input.created_at; // optional ISO string
+
+  if (created_at) {
+    db.prepare(`
+      INSERT INTO memories (id, session_id, role, content, tokens, importance, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `).run(input.id, input.session_id, input.role, input.content, tokens, importance, metadata, created_at);
+  } else {
+    db.prepare(`
+      INSERT INTO memories (id, session_id, role, content, tokens, importance, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `).run(input.id, input.session_id, input.role, input.content, tokens, importance, metadata);
+  }
+
+  return getMemoryById(db, input.id)!;
 }
 
 export function getMemoryById(db: AlmaDB, id: string): Memory | null {

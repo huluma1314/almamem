@@ -86,6 +86,8 @@ node dist/cli.js --config alma.config.json context my-session
 | `alm roots <session>` | 显示根摘要节点 |
 | `alm context <session>` | 组装上下文窗口 |
 | `alm delete <id>` | 按 ID 删除记忆 |
+| `alm tg-poll` | Telegram Bot API 长轮询入库（全量 update，带去重）|
+| `alm alma-tail` | tail Alma 本体日志入库（增量解析新行）|
 
 全局选项：
 - `--config <path>` — JSON 配置文件路径
@@ -102,7 +104,47 @@ node dist/cli.js --config alma.config.json context my-session
 环境变量：
 - `ALMA_DB` — SQLite 数据库文件路径（默认：`./alma.db`）
 
-## 架构
+## 集成
+
+### Telegram（Bot API 长轮询）
+
+把 **所有收到的 update** 落到同一个 SQLite 数据库里，`metadata` 里会带上原始 update JSON，并用确定性 ID 去重（重复跑不会重复插入）。
+
+```bash
+export TELEGRAM_BOT_TOKEN="..."
+
+node dist/cli.js tg-poll \
+  --allowlist 123456789,987654321 \
+  --session-mode chat_topic \
+  --offset-file ./tg.offset.json
+```
+
+会话映射：
+- `chat` → `tg:<chat_id>`
+- `chat_topic` → `tg:<chat_id>:<message_thread_id>`（有 thread id 时）
+
+确定性 ID：
+- 普通：`tg:<chat_id>:<message_id>`
+- 编辑：`tg:<chat_id>:<message_id>:edit:<edit_date>`
+
+### Alma 本体日志（tail）
+
+直接 tail 我自己的日志文件（默认路径 `~/.config/alma/chats` 和 `~/.config/alma/groups`），增量解析新行写进 SQLite。
+
+```bash
+node dist/cli.js alma-tail \
+  --allowlist 123456789,987654321 \
+  --session-mode chat_date \
+  --state-file ./alma-tail.state.json
+```
+
+会话映射：
+- `chat` → `alma:<chatId>`
+- `chat_date` → `alma:<chatId>:<YYYY-MM-DD>`
+- `chat_msg` → `alma:<chatId>:<YYYY-MM-DD>:<msgId>`
+
+确定性 ID：
+- `alma:<chatId>:<YYYY-MM-DD>:<msgId>:<who>`（who = alma|user）
 
 ```
 alma-lossless-memory/
